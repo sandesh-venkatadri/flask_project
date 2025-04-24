@@ -1,0 +1,38 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    padding: 20px;
+}
+
+.container {
+    max-width: 400px;
+    margin: auto;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+input {
+    width: 100%;
+    padding: 10px;
+    margin: 5px 0;
+}
+
+button {
+    width: 100%;
+    padding: 10px;
+    background: #333;
+    color: white;
+    border: none;
+}
+
+.flash {
+    margin: 10px 0;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+.flash.success { background: #c8e6c9; color: #256029; }
+.flash.danger { background: #ffcdd2; color: #b71c1c; }
+.flash.warning { background: #fff3cd; color: #856404; }
+.flash.info    { background: #d1ecf1; color: #0c5460; }
