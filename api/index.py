@@ -1,73 +1,112 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
 import sqlite3
+import logging
+from flask import Flask, render_template, request, redirect, url_for, session, g
 
+# Enable debug logs
+logging.basicConfig(level=logging.DEBUG)
+
+# Flask app factory
 def create_app():
     app = Flask(__name__)
     app.secret_key = 'your_secret_key'
+    app.debug = True
+
+    # Path to the SQLite DB (in-memory if Vercel restricts file access)
+    DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'users.db')
+
+    def get_db():
+        if 'db' not in g:
+            g.db = sqlite3.connect(DB_PATH)
+            g.db.row_factory = sqlite3.Row
+        return g.db
+
+    @app.teardown_appcontext
+    def close_db(error):
+        db = g.pop('db', None)
+        if db is not None:
+            db.close()
 
     def init_db():
-        conn = sqlite3.connect('users.db')
-        conn.execute('''CREATE TABLE IF NOT EXISTS users (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT UNIQUE NOT NULL,
-                            password TEXT NOT NULL)''')
-        conn.close()
+        with app.app_context():
+            db = get_db()
+            db.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL
+                )
+            ''')
+            db.commit()
 
     init_db()
 
     @app.route('/')
     def home():
+        if 'user_id' in session:
+            return redirect(url_for('dashboard'))
         return redirect(url_for('login'))
-
-    @app.route('/register', methods=['GET', 'POST'])
-    def register():
-        if request.method == 'POST':
-            username = request.form['username']
-            password = generate_password_hash(request.form['password'])
-
-            try:
-                with sqlite3.connect('users.db') as conn:
-                    conn.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
-                flash("Registered successfully! Please login.", "success")
-                return redirect(url_for('login'))
-            except sqlite3.IntegrityError:
-                flash("Username already exists!", "danger")
-
-        return render_template('register.html')
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
-        if request.method == 'POST':
-            username = request.form['username']
-            password_input = request.form['password']
+        try:
+            if request.method == 'POST':
+                username = request.form['username']
+                password = request.form['password']
 
-            with sqlite3.connect('users.db') as conn:
-                user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+                db = get_db()
+                user = db.execute(
+                    'SELECT * FROM users WHERE username = ? AND password = ?',
+                    (username, password)
+                ).fetchone()
 
-            if user and check_password_hash(user[2], password_input):
-                session['username'] = username
-                flash("Login successful!", "success")
-                return redirect(url_for('dashboard'))
-            else:
-                flash("Invalid credentials", "danger")
+                if user:
+                    session['user_id'] = user['id']
+                    return redirect(url_for('dashboard'))
+                else:
+                    return render_template('login.html', error='Invalid credentials')
 
-        return render_template('login.html')
+            return render_template('login.html')
+        except Exception as e:
+            app.logger.error(f"Exception on /login: {e}")
+            return "Internal Server Error", 500
+
+    @app.route('/register', methods=['GET', 'POST'])
+    def register():
+        try:
+            if request.method == 'POST':
+                username = request.form['username']
+                password = request.form['password']
+
+                db = get_db()
+                try:
+                    db.execute(
+                        'INSERT INTO users (username, password) VALUES (?, ?)',
+                        (username, password)
+                    )
+                    db.commit()
+                    return redirect(url_for('login'))
+                except sqlite3.IntegrityError:
+                    return render_template('register.html', error='Username already exists')
+
+            return render_template('register.html')
+        except Exception as e:
+            app.logger.error(f"Exception on /register: {e}")
+            return "Internal Server Error", 500
 
     @app.route('/dashboard')
     def dashboard():
-        if 'username' not in session:
-            flash("Please login first!", "warning")
+        if 'user_id' not in session:
             return redirect(url_for('login'))
-        return render_template('dashboard.html', username=session['username'])
+        return render_template('dashboard.html')
 
     @app.route('/logout')
     def logout():
-        session.pop('username', None)
-        flash("Logged out successfully!", "info")
+        session.pop('user_id', None)
         return redirect(url_for('login'))
 
     return app
 
-# For Vercel handler
+
+# Vercel expects this at the global level
 app = create_app()
